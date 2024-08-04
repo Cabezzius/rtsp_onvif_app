@@ -19,19 +19,17 @@ services:
       - CAMERA2_PASS=54684200Balles
     volumes:
       - ./recordings:/app/recordings
-      - ./config:/app/config  # Nuevo volumen para la configuración
+      - ./config:/app/config
     ports:
       - "5900:5900"  # Puerto para VNC
     restart: unless-stopped
     networks:
       - rtsp-network
-    #tty: true  # Añade esta línea
-    stdin_open: true  # Y esta línea
 
 volumes:
   recordings:
+  config:
 
 networks:
   rtsp-network:
     driver: bridge
-#cambio

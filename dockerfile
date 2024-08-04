@@ -25,15 +25,16 @@ RUN apt-get update && apt-get install -y \
     libv4l-dev \
     libxvidcore-dev \
     libx264-dev \
+    libx265-dev \
     libavcodec-extra \
     iputils-ping \
     && rm -rf /var/lib/apt/lists/*
 
-# Instala las bibliotecas Python necesarias
-RUN pip3 install --no-cache-dir --upgrade pip && \
-    pip3 install --no-cache-dir opencv-python numpy PyQt5 onvif-zeep==0.2.12 requests
-    
-    RUN mkdir -p /usr/local/lib/python3.8/dist-packages/wsdl && \
+# Instalar las bibliotecas Python necesarias
+RUN pip3 install --upgrade pip && \
+    pip3 install opencv-python-headless numpy PyQt5 onvif-zeep==0.2.12 ffmpeg-python
+
+RUN mkdir -p /usr/local/lib/python3.8/dist-packages/wsdl && \
     wget https://www.onvif.org/ver10/device/wsdl/devicemgmt.wsdl -O /usr/local/lib/python3.8/dist-packages/wsdl/devicemgmt.wsdl && \
     wget https://www.onvif.org/ver10/media/wsdl/media.wsdl -O /usr/local/lib/python3.8/dist-packages/wsdl/media.wsdl && \
     wget https://www.onvif.org/ver20/ptz/wsdl/ptz.wsdl -O /usr/local/lib/python3.8/dist-packages/wsdl/ptz.wsdl && \
@@ -45,22 +46,18 @@ RUN pip3 install --no-cache-dir --upgrade pip && \
     wget https://www.w3.org/2004/08/xop/include -O /usr/local/lib/ver10/schema/xop-include.xsd && \
     wget https://www.w3.org/2005/05/xmlmime -O /usr/local/lib/ver10/schema/xmlmime.xsd
 
+# Crear directorios necesarios
+RUN mkdir -p /app /app/config /app/recordings
 
-# Verifica la instalación de las dependencias y la existencia de los archivos
-RUN pip3 list && \
-    ls -R /usr/local/lib/python3.8/dist-packages/wsdl && \
-    ls -R /usr/local/lib/ver10/schema  
-
-# Crea un directorio para la aplicación
-WORKDIR /app
-# Crear directorio para la configuración
-RUN mkdir -p /app/config
-# Copia el código de la aplicación y el script de ejecución al contenedor
-COPY rtsp_onvif_app.py run_app.sh ui_module.py /app/
+# Copiar todos los archivos Python y el script de ejecución
+COPY *.py /app/
+COPY run_app.sh /app/
 
 # Dar permisos de ejecución al script
 RUN chmod +x /app/run_app.sh
 
-# Ejecuta el script
+# Establecer el directorio de trabajo
+WORKDIR /app
+
+# Ejecutar el script
 CMD ["/app/run_app.sh"]
-#cambio para el branch

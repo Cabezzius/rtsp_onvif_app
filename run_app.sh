@@ -25,21 +25,9 @@ echo "Contenido de /usr/local/lib/ver10/schema:"
 ls -l /usr/local/lib/ver10/schema
 
 # Comprobar conectividad con las cámaras
-echo "Comprobando conectividad con las cámaras..."
-ping -c 1 $CAMERA1_IP && echo "Cámara $CAMERA1_IP accesible" || echo "No se puede acceder a la cámara $CAMERA1_IP"
-ping -c 1 $CAMERA2_IP && echo "Cámara $CAMERA2_IP accesible" || echo "No se puede acceder a la cámara $CAMERA2_IP"
+#echo "Comprobando conectividad con las cámaras..."
+#ping -c 1 $CAMERA1_IP && echo "Cámara $CAMERA1_IP accesible" || echo "No se puede acceder a la cámara $CAMERA1_IP"
+#ping -c 1 $CAMERA2_IP && echo "Cámara $CAMERA2_IP accesible" || echo "No se puede acceder a la cámara $CAMERA2_IP"
 
-# Verificar la existencia del archivo Python
-echo "Verificando la existencia de rtsp_onvif_app.py..."
-ls -l /app/rtsp_onvif_app.py
-
-# Mostrar las primeras líneas del archivo Python
-echo "Primeras líneas de rtsp_onvif_app.py:"
-head -n 10 /app/rtsp_onvif_app.py
-
-# Ejecutar la aplicación con salida detallada
-echo "Iniciando la aplicación Python..."
-python3 -v /app/rtsp_onvif_app.py
 # Ejecutar la aplicación
 python3 rtsp_onvif_app.py
-#hecho un cambio

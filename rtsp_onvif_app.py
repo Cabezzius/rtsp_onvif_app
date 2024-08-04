@@ -1,17 +1,20 @@
 import sys
 import cv2
 import numpy as np
-from PyQt5.QtWidgets import QDialog, QVBoxLayout, QFormLayout, QLineEdit, QPushButton, QLabel, QScrollArea, QWidget
-from PyQt5.QtCore import QThread, pyqtSignal
+from PyQt5.QtWidgets import QApplication, QDialog, QMessageBox
+from PyQt5.QtCore import QThread, pyqtSignal, QTimer
 from PyQt5.QtGui import QImage, QPixmap
-from PyQt5.QtCore import Qt
 from onvif import ONVIFCamera
 import datetime
-import json
 import os
 import logging
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from config_dialog import get_camera_config, ConfigDialog
 from ui_module import RTSPPlayerUI
+from welcome_screen import WelcomeScreen
+from camera import Camera
+from utils import retry_with_timeout
 
 logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
 
@@ -27,22 +30,29 @@ class CameraThread(QThread):
         self.camera_ip = camera_ip
         self._run_flag = True
 
-    def run(self):
+    @retry_with_timeout(max_retries=3, delay=2, timeout=10)
+    def connect_to_camera(self):
         cap = cv2.VideoCapture(self.rtsp_url)
         if not cap.isOpened():
-            self.error_signal.emit(self.camera_ip, f"No se pudo abrir la conexión RTSP para {self.camera_ip}")
-            return
+            raise Exception(f"No se pudo abrir la conexión RTSP para {self.camera_ip}")
+        return cap
 
+    def run(self):
         while self._run_flag:
-            ret, cv_img = cap.read()
-            if ret:
-                self.change_pixmap_signal.emit(cv_img, self.camera_ip)
-            else:
-                self.error_signal.emit(self.camera_ip, f"Failed to read frame from camera {self.camera_ip}")
-                time.sleep(5)  # Wait a bit longer before trying again
-                cap.release()
-                cap = cv2.VideoCapture(self.rtsp_url)  # Try to reconnect
-        cap.release()
+            try:
+                cap = self.connect_to_camera()
+                while self._run_flag:
+                    ret, cv_img = cap.read()
+                    if ret:
+                        self.change_pixmap_signal.emit(cv_img, self.camera_ip)
+                    else:
+                        raise Exception(f"Failed to read frame from camera {self.camera_ip}")
+            except Exception as e:
+                self.error_signal.emit(self.camera_ip, str(e))
+                time.sleep(5)  # Esperar antes de intentar nuevamente
+            finally:
+                if 'cap' in locals():
+                    cap.release()
 
     def stop(self):
         self._run_flag = False
@@ -51,7 +61,7 @@ class CameraThread(QThread):
 class RTSPPlayer:
     def __init__(self, cameras):
         self.cameras = cameras
-        self.recordings = {cam['ip']: {'is_recording': False, 'out': None, 'start_time': None, 'frame_count': 0} for cam in cameras}
+        self.recordings = {cam.ip: {'is_recording': False, 'process': None, 'start_time': None} for cam in cameras}
         self.recordings_dir = '/app/recordings'
         self.threads = {}
         self.onvif_cameras = {}
@@ -59,45 +69,87 @@ class RTSPPlayer:
         callbacks = {
             'toggle_recording': self.toggle_recording,
             'start_move': self.start_move_camera,
-            'stop_move': self.stop_move_camera
+            'stop_move': self.stop_move_camera,
+            'update_cameras': self.update_cameras
         }
         self.ui = RTSPPlayerUI(cameras, callbacks)
 
-        self.setup_onvif_cameras()
-        self.start_camera_threads()
+        # Iniciar la configuración de cámaras de forma asíncrona
+        self.setup_cameras_async()
+
+    def setup_cameras_async(self):
+        with ThreadPoolExecutor(max_workers=len(self.cameras)) as executor:
+            future_to_camera = {executor.submit(self.setup_single_camera, cam): cam for cam in self.cameras}
+            for future in as_completed(future_to_camera):
+                camera = future_to_camera[future]
+                try:
+                    future.result()
+                except Exception as e:
+                    logging.error(f"Failed to setup camera {camera.ip}: {str(e)}")
+
+    @retry_with_timeout(max_retries=3, delay=2, timeout=10)
+    def setup_single_camera(self, camera):
+        self.setup_onvif_camera(camera)
+        self.start_camera_thread(camera)
+
+    @retry_with_timeout(max_retries=3, delay=2, timeout=10)
+    def setup_onvif_camera(self, camera):
+        mycam = ONVIFCamera(camera.ip, camera.onvif_port, camera.user, camera.password, '/usr/local/lib/python3.8/dist-packages/wsdl/')
+        media = mycam.create_media_service()
+        ptz = mycam.create_ptz_service()
+        media_profile = media.GetProfiles()[0]
+        self.onvif_cameras[camera.ip] = {'camera': mycam, 'media': media, 'ptz': ptz, 'media_profile': media_profile}
+        logging.info(f"ONVIF camera setup successful for {camera.ip}")
+
+    def start_camera_thread(self, camera):
+        thread = CameraThread(camera.rtsp_url, camera.ip)
+        thread.change_pixmap_signal.connect(self.update_image)
+        thread.error_signal.connect(self.handle_camera_error)
+        self.threads[camera.ip] = thread
+        thread.start()
+
     def update_cameras(self, new_cameras):
+        logging.info("Iniciando actualización de cámaras")
+        
         # Detener las conexiones existentes
         for thread in self.threads.values():
-            thread.stop()    
-
-    def setup_onvif_cameras(self):
-        for cam in self.cameras:
-            try:
-                mycam = ONVIFCamera(cam['ip'], cam['port'], cam['user'], cam['pass'], '/usr/local/lib/python3.8/dist-packages/wsdl/')
-                media = mycam.create_media_service()
-                ptz = mycam.create_ptz_service()
-                media_profile = media.GetProfiles()[0]
-                self.onvif_cameras[cam['ip']] = {'camera': mycam, 'media': media, 'ptz': ptz, 'media_profile': media_profile}
-                logging.info(f"ONVIF camera setup successful for {cam['ip']}")
-            except Exception as e:
-                logging.error(f"Failed to setup ONVIF camera for {cam['ip']}: {str(e)}")
-
-    def start_camera_threads(self):
-        for cam in self.cameras:
-            thread = CameraThread(cam['rtsp_url'], cam['ip'])
-            thread.change_pixmap_signal.connect(self.update_image)
-            thread.error_signal.connect(self.handle_camera_error)
-            self.threads[cam['ip']] = thread
-            thread.start()
+            thread.stop()
+        
+        # Esperar a que todos los hilos se detengan
+        for thread in self.threads.values():
+            thread.wait()
+        
+        # Limpiar las conexiones existentes
+        self.threads.clear()
+        self.onvif_cameras.clear()
+        
+        # Detener todas las grabaciones en curso
+        for recording in self.recordings.values():
+            if recording['is_recording']:
+                recording['process'].terminate()
+        
+        # Actualizar la lista de cámaras
+        self.cameras = new_cameras
+        self.recordings = {cam.ip: {'is_recording': False, 'process': None, 'start_time': None} for cam in new_cameras}
+        
+        # Reiniciar las conexiones
+        self.setup_cameras_async()
+        
+        # Actualizar la UI
+        self.ui.update_cameras(self.cameras)
+        
+        logging.info("Actualización de cámaras completada")
+        thread = CameraThread(camera.rtsp_url, camera.ip)
+        thread.change_pixmap_signal.connect(self.update_image)
+        thread.error_signal.connect(self.handle_camera_error)
+        self.threads[camera.ip] = thread
+        thread.start()
 
     def update_image(self, cv_img, camera_ip):
-        qt_img = self.convert_cv_qt(cv_img, camera_ip)
+        qt_img = self.convert_cv_qt(cv_img)
         self.ui.update_image(qt_img, camera_ip)
 
-        if self.recordings[camera_ip]['is_recording']:
-            self.record_frame(camera_ip, cv_img)
-
-    def convert_cv_qt(self, cv_img, camera_ip):
+    def convert_cv_qt(self, cv_img):
         rgb_image = cv2.cvtColor(cv_img, cv2.COLOR_BGR2RGB)
         h, w, ch = rgb_image.shape
         bytes_per_line = ch * w
@@ -115,47 +167,41 @@ class RTSPPlayer:
         now = datetime.datetime.now()
         filename = os.path.join(self.recordings_dir, f"{camera_ip}_{now.strftime('%Y%m%d_%H%M%S')}.mp4")
         
-        cap = cv2.VideoCapture(self.cameras[self.cameras.index(next(cam for cam in self.cameras if cam['ip'] == camera_ip))]['rtsp_url'])
-        width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-        height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-        fps = int(cap.get(cv2.CAP_PROP_FPS))
-        cap.release()
-
-        # Aumentar el bitrate (por ejemplo, a 5Mbps)
-        bitrate = 5000000
-
-        # Usar el códec H.264 para mejor calidad y compatibilidad
-        fourcc = cv2.VideoWriter_fourcc(*'avc1')
+        camera = next(cam for cam in self.cameras if cam.ip == camera_ip)
         
-        self.recordings[camera_ip]['out'] = cv2.VideoWriter(filename, fourcc, fps, (width, height))
-        
-        # Configurar el bitrate
-        self.recordings[camera_ip]['out'].set(cv2.VIDEOWRITER_PROP_QUALITY, 1)  # Mejor calidad
-        self.recordings[camera_ip]['out'].set(cv2.VIDEOWRITER_PROP_BITRATE, bitrate)
+        try:
+            process = (
+                ffmpeg
+                .input(camera.rtsp_url, rtsp_transport='tcp')
+                .output(filename, vcodec='libx264', crf='23', preset='medium', 
+                        acodec='aac', audio_bitrate='128k',
+                        f='mp4', movflags='faststart')
+                .overwrite_output()
+                .run_async(pipe_stdout=True, pipe_stderr=True)
+            )
 
-        self.recordings[camera_ip]['is_recording'] = True
-        self.recordings[camera_ip]['start_time'] = time.time()
-        self.recordings[camera_ip]['frame_count'] = 0
-        self.ui.set_record_button_text(camera_ip, 'Detener Grabación')
-        logging.info(f"Iniciando grabación para {camera_ip}: {filename} con resolución {width}x{height} a {fps} FPS y bitrate {bitrate/1000000}Mbps")
+            self.recordings[camera_ip] = {
+                'process': process,
+                'is_recording': True,
+                'start_time': time.time(),
+                'filename': filename
+            }
+            self.ui.set_record_button_text(camera_ip, 'Detener Grabación')
+            logging.info(f"Iniciando grabación para {camera_ip}: {filename}")
+
+        except ffmpeg.Error as e:
+            logging.error(f"Error al iniciar la grabación para {camera_ip}: {str(e)}")
 
     def stop_recording(self, camera_ip):
-        self.recordings[camera_ip]['is_recording'] = False
-        if self.recordings[camera_ip]['out']:
-            self.recordings[camera_ip]['out'].release()
-            self.recordings[camera_ip]['out'] = None
-        self.ui.set_record_button_text(camera_ip, 'Iniciar Grabación')
-        logging.info(f"Grabación detenida para {camera_ip}")
-
-    def record_frame(self, camera_ip, frame):
         if self.recordings[camera_ip]['is_recording']:
-            self.recordings[camera_ip]['out'].write(frame)
-            self.recordings[camera_ip]['frame_count'] += 1
-            
+            process = self.recordings[camera_ip]['process']
+            process.communicate()  # Espera a que el proceso termine
+            self.recordings[camera_ip]['is_recording'] = False
+            self.recordings[camera_ip]['process'] = None
             elapsed_time = time.time() - self.recordings[camera_ip]['start_time']
-            if elapsed_time >= MAX_RECORDING_TIME:
-                self.stop_recording(camera_ip)
-                self.start_recording(camera_ip)
+            file_size = os.path.getsize(self.recordings[camera_ip]['filename'])
+            self.ui.set_record_button_text(camera_ip, 'Iniciar Grabación')
+            logging.info(f"Grabación detenida para {camera_ip}. Duración: {elapsed_time:.2f} segundos. Tamaño del archivo: {file_size/1024/1024:.2f} MB")
 
     def start_move_camera(self, camera_ip, direction):
         if camera_ip not in self.onvif_cameras:
@@ -202,44 +248,39 @@ class RTSPPlayer:
             logging.error(f"Failed to stop moving camera {camera_ip}: {str(e)}")
 
     def handle_camera_error(self, camera_ip, error_message):
+        logging.error(f"Failed to stop moving camera {camera_ip}: {str(e)}")
+
+    def handle_camera_error(self, camera_ip, error_message):
         logging.error(f"Camera error for {camera_ip}: {error_message}")
+        # Aquí puedes implementar lógica adicional para manejar errores, como intentar reconectar la cámara
 
 def main():
     app = QApplication(sys.argv)
-    
+
+    welcome = WelcomeScreen()
+    if welcome.exec_() == QDialog.Rejected:
+        sys.exit(0)
+
     # Obtener configuración
-    camera_configs = get_camera_config()
+    cameras = get_camera_config()
     
-    # Si no hay configuración, usar variables de entorno
-    if not camera_configs:
-        camera_configs = [
-            {
-                'ip': os.environ.get('CAMERA1_IP'),
-                'puerto': os.environ.get('CAMERA1_PORT'),
-                'usuario': os.environ.get('CAMERA1_USER'),
-                'contraseña': os.environ.get('CAMERA1_PASS'),
-            },
-            {
-                'ip': os.environ.get('CAMERA2_IP'),
-                'puerto': os.environ.get('CAMERA2_PORT'),
-                'usuario': os.environ.get('CAMERA2_USER'),
-                'contraseña': os.environ.get('CAMERA2_PASS'),
-            }
-        ]
-    
-    cameras = []
-    for config in camera_configs:
-        camera = {
-            'ip': config['ip'],
-            'port': int(config['puerto']),
-            'user': config['usuario'],
-            'pass': config['contraseña'],
-            'rtsp_url': f"rtsp://{config['usuario']}:{config['contraseña']}@{config['ip']}:{config['puerto']}/live/ch0"
-        }
-        cameras.append(camera)
+    # Si no hay configuración, pedir al usuario que configure las cámaras
+    if not cameras:
+        config_dialog = ConfigDialog()
+        if config_dialog.exec_() == QDialog.Rejected:
+            sys.exit(0)
+        cameras = get_camera_config()
+
+    if not cameras:
+        logging.error("No se pudo configurar ninguna cámara. Saliendo...")
+        sys.exit(1)
 
     player = RTSPPlayer(cameras)
     player.ui.show()
+    
+    # Iniciar un temporizador para mostrar un mensaje de "Conectando..." después de un breve retraso
+    QTimer.singleShot(100, lambda: player.ui.show_connecting_message())
+
     sys.exit(app.exec_())
 
 if __name__ == "__main__":
