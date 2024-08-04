@@ -1,0 +1,35 @@
+version: '3.8'
+
+services:
+  rtsp-onvif-app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: rtsp-onvif-app
+    container_name: rtsp-onvif-app
+    environment:
+      - DISPLAY=:1
+      - CAMERA1_IP=192.168.3.13
+      - CAMERA1_PORT=8899
+      - CAMERA1_USER=cabezz
+      - CAMERA1_PASS=54684200Balles
+      - CAMERA2_IP=192.168.3.6
+      - CAMERA2_PORT=8899
+      - CAMERA2_USER=cabezz
+      - CAMERA2_PASS=54684200Balles
+    volumes:
+      - ./recordings:/app/recordings
+    ports:
+      - "5900:5900"  # Puerto para VNC
+    restart: unless-stopped
+    networks:
+      - rtsp-network
+    #tty: true  # Añade esta línea
+    stdin_open: true  # Y esta línea
+
+volumes:
+  recordings:
+
+networks:
+  rtsp-network:
+    driver: bridge
