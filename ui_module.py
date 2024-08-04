@@ -69,3 +69,4 @@ class RTSPPlayerUI(QMainWindow):
 
 # Puedes personalizar la apariencia de los botones o la disposición de la interfaz
 # modificando los métodos create_button e initUI respectivamente.
+#cambio para el branch

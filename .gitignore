@@ -1,0 +1,4 @@
+#Asi le decimos a git que no coja la carpeta /recordings/
+.gitignore
+/recordings/
+/rtsp_onvif_app/

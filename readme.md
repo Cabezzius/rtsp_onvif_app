@@ -17,13 +17,13 @@ Este proyecto es una aplicación Python que permite visualizar y controlar cáma
 
 ## Configuración
 
-1. Clona este repositorio:
-   ```
-   git clone https://github.com/tu-usuario/nombre-del-repo.git
-   cd nombre-del-repo
-   ```
+Hay dos formas de configurar las cámaras para esta aplicación:
 
-2. Configura las variables de entorno en el archivo `docker-compose.yml`:
+1. **Configuración mediante interfaz gráfica:**
+   Al iniciar la aplicación, se abrirá una ventana de configuración donde podrás introducir los detalles de tus cámaras. Esta configuración se guardará para futuros usos.
+
+2. **Configuración mediante variables de entorno:**
+   Si prefieres, puedes configurar las cámaras usando variables de entorno en el archivo `docker-compose.yml`:
    ```yaml
    environment:
      - CAMERA1_IP=192.168.x.x
@@ -36,6 +36,8 @@ Este proyecto es una aplicación Python que permite visualizar y controlar cáma
      - CAMERA2_PASS=contraseña
    ```
 
+La aplicación intentará usar primero la configuración guardada mediante la interfaz gráfica. Si no encuentra ninguna configuración guardada, usará las variables de entorno.
+
 ## Uso
 
 1. Construye e inicia el contenedor Docker:
@@ -45,9 +47,11 @@ Este proyecto es una aplicación Python que permite visualizar y controlar cáma
 
 2. Conéctate al contenedor usando un cliente VNC en `localhost:5900`.
 
-3. La interfaz de la aplicación debería aparecer, mostrando las transmisiones de video de las cámaras configuradas.
+3. Si es la primera vez que ejecutas la aplicación o no hay configuración guardada, se abrirá la ventana de configuración. Introduce los detalles de tus cámaras y guarda la configuración.
 
-4. Usa los botones de control para mover las cámaras (si son compatibles con ONVIF) y para iniciar/detener la grabación.
+4. La interfaz principal de la aplicación aparecerá, mostrando las transmisiones de video de las cámaras configuradas.
+
+5. Usa los botones de control para mover las cámaras (si son compatibles con ONVIF) y para iniciar/detener la grabación.
 
 ## Estructura del proyecto
 
