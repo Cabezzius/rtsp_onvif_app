@@ -10,6 +10,9 @@ class RTSPPlayerUI(QMainWindow):
         self.video_labels = {}
         self.record_buttons = {}
         self.initUI()
+        config_btn = QPushButton("Configurar Cámaras")
+        config_btn.clicked.connect(self.open_config_dialog)
+        layout.addWidget(config_btn)
 
     def initUI(self):
         self.setWindowTitle('RTSP Player')
@@ -66,6 +69,12 @@ class RTSPPlayerUI(QMainWindow):
 
     def set_record_button_text(self, camera_ip, text):
         self.record_buttons[camera_ip].setText(text)
+    def open_config_dialog(self):
+        new_config = get_camera_config()
+        if new_config:
+            # Aquí puedes implementar la lógica para actualizar la configuración
+            # Esto podría implicar reiniciar las conexiones de las cámaras
+            pass
 
 # Puedes personalizar la apariencia de los botones o la disposición de la interfaz
 # modificando los métodos create_button e initUI respectivamente.

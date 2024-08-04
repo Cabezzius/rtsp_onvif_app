@@ -53,7 +53,8 @@ RUN pip3 list && \
 
 # Crea un directorio para la aplicación
 WORKDIR /app
-
+# Crear directorio para la configuración
+RUN mkdir -p /app/config
 # Copia el código de la aplicación y el script de ejecución al contenedor
 COPY rtsp_onvif_app.py run_app.sh ui_module.py /app/
 

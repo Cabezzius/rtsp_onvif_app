@@ -19,6 +19,7 @@ services:
       - CAMERA2_PASS=54684200Balles
     volumes:
       - ./recordings:/app/recordings
+      - ./config:/app/config  # Nuevo volumen para la configuración
     ports:
       - "5900:5900"  # Puerto para VNC
     restart: unless-stopped
