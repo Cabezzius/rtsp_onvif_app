@@ -4,11 +4,11 @@ import json
 import logging
 
 class ConfigDialog(QDialog):
-    def __init__(self):
-        super().__init__()
+    def __init__(self, parent=None):
+        super().__init__(parent)
         self.setWindowTitle("Configuración de Cámaras")
         self.setGeometry(100, 100, 400, 300)
-        self.cameras = []
+        self.camera_configs = []
         self.initUI()
 
     def initUI(self):
@@ -40,7 +40,7 @@ class ConfigDialog(QDialog):
         self.setLayout(layout)
 
     def add_camera_form(self, camera=None):
-        camera_number = len(self.cameras) + 1
+        camera_number = len(self.camera_configs) + 1
         self.form_layout.addRow(QLabel(f"Cámara {camera_number}"))
         camera_form = {}
         fields = [
@@ -48,16 +48,17 @@ class ConfigDialog(QDialog):
             ('Puerto RTSP', 'rtsp_port', '554'),
             ('Puerto ONVIF', 'onvif_port', '80'),
             ('Usuario', 'user', ''),
-            ('Contraseña', 'password', '')
+            ('Contraseña', 'password', ''),
+            ('URL RTSP personalizada', 'rtsp_url', '')
         ]
         for label, attr, placeholder in fields:
             line_edit = QLineEdit()
             line_edit.setPlaceholderText(placeholder)
             if camera:
-                line_edit.setText(str(getattr(camera, attr)))
+                line_edit.setText(str(getattr(camera, attr) if attr != 'rtsp_url' else camera._rtsp_url or ''))
             self.form_layout.addRow(label, line_edit)
             camera_form[attr] = line_edit
-        self.cameras.append(camera_form)
+        self.camera_configs.append(camera_form)
 
     def load_existing_config(self):
         try:
@@ -72,11 +73,15 @@ class ConfigDialog(QDialog):
 
     def save_config(self):
         configs = []
-        for camera_form in self.cameras:
+        for camera_form in self.camera_configs:
             config = {attr: widget.text() for attr, widget in camera_form.items()}
             if config['ip']:  # Solo guardar si al menos la IP está especificada
-                camera = Camera.from_dict(config)
-                configs.append(camera.to_dict())
+                try:
+                    camera = Camera.from_dict(config)
+                    configs.append(camera.to_dict())
+                except ValueError as e:
+                    QMessageBox.warning(self, "Error de configuración", str(e))
+                    return
         
         if configs:
             with open('camera_config.json', 'w') as f:
@@ -86,16 +91,13 @@ class ConfigDialog(QDialog):
             QMessageBox.warning(self, "Configuración inválida", "Por favor, especifica al menos una cámara con una dirección IP.")
 
 def get_camera_config():
-    try:
-        dialog = ConfigDialog()
-        result = dialog.exec_()
-        if result == QDialog.Accepted:
+    dialog = ConfigDialog()
+    if dialog.exec_() == QDialog.Accepted:
+        try:
             with open('camera_config.json', 'r') as f:
                 configs = json.load(f)
             return [Camera.from_dict(config) for config in configs]
-        else:
-            logging.info("Configuración cancelada por el usuario")
-            return None
-    except Exception as e:
-        logging.error(f"Error al obtener la configuración de las cámaras: {str(e)}")
-        return None
+        except Exception as e:
+            logging.error(f"Error al cargar la configuración: {str(e)}")
+            return []
+    return []

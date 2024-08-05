@@ -31,8 +31,8 @@ class RTSPPlayerUI(QMainWindow):
                 widget.setParent(None)
 
         self.cameras = cameras
-        self.video_labels.clear()
-        self.record_buttons.clear()
+        self.video_labels = {}
+        self.record_buttons = {}
         
         grid_layout = QGridLayout()
         for i, cam in enumerate(self.cameras):
@@ -71,7 +71,6 @@ class RTSPPlayerUI(QMainWindow):
         config_btn.clicked.connect(self.open_config_dialog)
         self.main_layout.addWidget(config_btn)
 
-
     def create_button(self, text, pressed_callback, released_callback=None):
         btn = QPushButton(text)
         btn.setMaximumSize(50, 50)  # Hacer los botones más pequeños
@@ -81,30 +80,30 @@ class RTSPPlayerUI(QMainWindow):
         return btn
 
     def update_image(self, pixmap, camera_ip):
-        self.video_labels[camera_ip].setPixmap(pixmap)
+        if camera_ip in self.video_labels:
+            self.video_labels[camera_ip].setPixmap(pixmap)
+        else:
+            logging.warning(f"No label found for camera {camera_ip}")
 
     def set_record_button_text(self, camera_ip, text):
-        self.record_buttons[camera_ip].setText(text)
+        if camera_ip in self.record_buttons:
+            self.record_buttons[camera_ip].setText(text)
+        else:
+            logging.warning(f"No record button found for camera {camera_ip}")
 
     def open_config_dialog(self):
         try:
             new_config = get_camera_config()
-            if new_config is not None:
+            if new_config:
                 if 'update_cameras' in self.callbacks:
-                    QApplication.setOverrideCursor(Qt.WaitCursor)
                     self.callbacks['update_cameras'](new_config)
-                    QApplication.restoreOverrideCursor()
                 else:
                     logging.error("update_cameras callback not found")
         except Exception as e:
             logging.error(f"Error in open_config_dialog: {str(e)}")
             QMessageBox.critical(self, "Error", f"Se produjo un error al configurar las cámaras: {str(e)}")
-        finally:
-            QApplication.restoreOverrideCursor()
+
     def show_connecting_message(self):
         for label in self.video_labels.values():
             label.setText("Conectando...")
             label.setAlignment(Qt.AlignCenter)
-
-# Puedes personalizar la apariencia de los botones o la disposición de la interfaz
-# modificando los métodos create_button e initUI respectivamente.
